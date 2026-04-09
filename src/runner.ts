@@ -1,5 +1,9 @@
-import type { TickSize } from "@polymarket/clob-client";
+import type { OpenOrder, TickSize } from "@polymarket/clob-client";
 import type { AppConfig } from "./config.js";
+import {
+  OrderManager,
+  type OrderExecutionResult,
+} from "./execution/order-manager.js";
 import { RiskManager } from "./engine/risk-manager.js";
 import type { MarketSnapshot, Strategy } from "./engine/strategy.js";
 import { Logger } from "./lib/logger.js";
@@ -9,7 +13,8 @@ import { DataClient } from "./polymarket/data-client.js";
 import { GammaClient } from "./polymarket/gamma-client.js";
 import { GeoblockClient } from "./polymarket/geoblock-client.js";
 import { MarketWebSocketFeed } from "./polymarket/market-websocket.js";
-import { findOutcome } from "./polymarket/types.js";
+import type { NormalizedMarket } from "./polymarket/types.js";
+import type { UserChannelEvent } from "./polymarket/user-websocket.js";
 
 export class TradingRunner {
   private readonly gammaClient: GammaClient;
@@ -18,6 +23,7 @@ export class TradingRunner {
   private readonly geoblockClient: GeoblockClient;
   private readonly stateStore: StateStore;
   private readonly marketFeed?: MarketWebSocketFeed;
+  private readonly orderManager: OrderManager;
   private readonly reservedPositionByToken = new Map<string, number>();
   private state: BotState;
   private stopped = false;
@@ -42,6 +48,16 @@ export class TradingRunner {
       config.marketDataMode === "websocket"
         ? new MarketWebSocketFeed(config.marketWsUrl, config.marketWsReadyTimeoutMs, logger)
         : undefined;
+    this.orderManager = new OrderManager(config, clobService, logger, {
+      onHeartbeat: (heartbeat) => {
+        this.state.heartbeat = heartbeat;
+        this.persistState();
+      },
+      onUserEvent: (event) => {
+        this.state.lastOrderEvent = toStateOrderEvent(event);
+        this.persistState();
+      },
+    });
   }
 
   async start(): Promise<void> {
@@ -70,6 +86,7 @@ export class TradingRunner {
       } while (!this.stopped);
     } finally {
       this.marketFeed?.close();
+      this.orderManager.close();
       this.persistState();
     }
   }
@@ -77,28 +94,20 @@ export class TradingRunner {
   stop(): void {
     this.stopped = true;
     this.marketFeed?.close();
+    this.orderManager.close();
   }
 
   private async tick(): Promise<void> {
-    const market = await this.gammaClient.getMarketBySlug(this.config.marketSlug);
-    if (!market) {
-      throw new Error(`Market not found for slug: ${this.config.marketSlug}`);
-    }
+    const { market, selectedOutcome } = await this.gammaClient.resolveMarketOutcome(
+      this.config.marketSlug,
+      this.config.outcome,
+    );
 
     if (!market.enableOrderBook) {
       throw new Error(`Market ${market.slug} does not have enableOrderBook=true`);
     }
 
-    const selectedOutcome = findOutcome(market, this.config.outcome);
-    if (!selectedOutcome) {
-      throw new Error(
-        `Outcome "${this.config.outcome}" not found. Available outcomes: ${market.outcomes.map((outcome) => outcome.name).join(", ")}`,
-      );
-    }
-
-    if (!selectedOutcome.tokenId) {
-      throw new Error(`Outcome "${selectedOutcome.name}" does not have a CLOB token id`);
-    }
+    await this.syncOpenOrders(market, selectedOutcome.tokenId);
 
     const { bestBid, bestAsk, tickSize, source } = await this.getMarketPrices(
       selectedOutcome.tokenId,
@@ -146,8 +155,8 @@ export class TradingRunner {
       price: signal.price,
       size: signal.size,
     };
-    const decision = this.riskManager.evaluate(signal, currentPositionSize);
 
+    const decision = this.riskManager.evaluate(signal, currentPositionSize);
     if (!decision.allowed) {
       this.state.stats.skippedSignals += 1;
       this.persistState();
@@ -158,67 +167,23 @@ export class TradingRunner {
       return;
     }
 
-    if (!signal.tokenId || !signal.price || !signal.size) {
+    if (!signal.tokenId || !signal.price || !signal.size || signal.action === "HOLD") {
       throw new Error("Approved signal is missing token, price, or size");
     }
 
-    if (signal.action === "HOLD") {
-      return;
-    }
-
-    if (this.config.dryRun) {
-      this.state.stats.dryRunOrders += 1;
-      this.state.recentOrders.push({
-        createdAt: new Date().toISOString(),
-        mode: "dry-run",
-        tokenId: signal.tokenId,
-        side: signal.action,
-        price: signal.price,
-        size: signal.size,
-        reason: signal.reason,
-      });
-      this.state.recentOrders = this.state.recentOrders.slice(-50);
-      this.persistState();
-      this.logger.info("dry-run order", {
-        tokenId: signal.tokenId,
-        side: signal.action,
-        price: signal.price,
-        size: signal.size,
-        reason: signal.reason,
-      });
-      return;
-    }
-
-    const response = await this.clobService.createAndPostOrder({
+    const execution = await this.orderManager.submit({
+      market,
       tokenId: signal.tokenId,
       price: signal.price,
       size: signal.size,
       side: signal.action,
       tickSize,
       negRisk: market.negRisk,
-    });
-
-    this.reservePosition(signal.tokenId, signal.size);
-    this.state.stats.liveOrders += 1;
-    this.state.recentOrders.push({
-      createdAt: new Date().toISOString(),
-      mode: "live",
-      tokenId: signal.tokenId,
-      side: signal.action,
-      price: signal.price,
-      size: signal.size,
       reason: signal.reason,
     });
-    this.state.recentOrders = this.state.recentOrders.slice(-50);
-    this.persistState();
 
-    this.logger.info("live order submitted", {
-      tokenId: signal.tokenId,
-      side: signal.action,
-      price: signal.price,
-      size: signal.size,
-      response,
-    });
+    this.recordExecution(execution, market, selectedOutcome.name);
+    await this.syncOpenOrders(market, selectedOutcome.tokenId);
   }
 
   private async checkGeoblock(): Promise<void> {
@@ -252,6 +217,75 @@ export class TradingRunner {
     }
 
     throw new Error(reason);
+  }
+
+  private recordExecution(
+    execution: OrderExecutionResult,
+    market: NormalizedMarket,
+    outcomeName: string,
+  ): void {
+    if (execution.mode === "dry-run") {
+      this.state.stats.dryRunOrders += 1;
+    } else {
+      this.state.stats.liveOrders += 1;
+      this.reservePosition(execution.tokenId, execution.size);
+    }
+
+    this.state.recentOrders.push({
+      createdAt: execution.createdAt,
+      mode: execution.mode,
+      tokenId: execution.tokenId,
+      marketSlug: market.slug,
+      marketQuestion: market.question,
+      outcomeName,
+      side: execution.side,
+      price: execution.price,
+      size: execution.size,
+      reason: execution.reason,
+      orderId: execution.orderId,
+      status: execution.status,
+    });
+    this.state.recentOrders = this.state.recentOrders.slice(-50);
+    this.persistState();
+
+    const logContext = {
+      tokenId: execution.tokenId,
+      side: execution.side,
+      price: execution.price,
+      size: execution.size,
+      reason: execution.reason,
+      orderId: execution.orderId,
+      status: execution.status,
+      userStreamConnected: execution.userStreamConnected,
+      response: execution.response,
+    };
+
+    if (execution.mode === "dry-run") {
+      this.logger.info("dry-run order", logContext);
+      return;
+    }
+
+    this.logger.info("live order submitted", logContext);
+  }
+
+  private async syncOpenOrders(market: NormalizedMarket, tokenId: string): Promise<void> {
+    if (this.config.dryRun) {
+      this.state.openOrders = [];
+      this.persistState();
+      return;
+    }
+
+    try {
+      const orders = await this.orderManager.reconcileOpenOrders({ market, tokenId });
+      this.state.openOrders = orders.map(toStateOpenOrder).slice(-50);
+      this.replaceReservedPosition(tokenId, reservedBuySize(orders));
+      this.persistState();
+    } catch (error) {
+      this.logger.warn("failed to reconcile open orders", {
+        tokenId,
+        error: toErrorMessage(error),
+      });
+    }
   }
 
   private restoreReservedPositions(): void {
@@ -328,6 +362,15 @@ export class TradingRunner {
     this.reservedPositionByToken.set(tokenId, current + size);
     this.persistState();
   }
+
+  private replaceReservedPosition(tokenId: string, size: number): void {
+    if (size <= 0) {
+      this.reservedPositionByToken.delete(tokenId);
+      return;
+    }
+
+    this.reservedPositionByToken.set(tokenId, size);
+  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -357,6 +400,85 @@ function matchesToken(position: Record<string, unknown>, tokenId: string): boole
     position.asset === tokenId ||
     position.asset_id === tokenId
   );
+}
+
+function reservedBuySize(orders: OpenOrder[]): number {
+  return orders.reduce((sum, order) => {
+    if (order.side !== "BUY") {
+      return sum;
+    }
+
+    const original = Number(order.original_size);
+    const matched = Number(order.size_matched);
+    if (!Number.isFinite(original) || !Number.isFinite(matched)) {
+      return sum;
+    }
+
+    return sum + Math.max(0, original - matched);
+  }, 0);
+}
+
+function toStateOrderEvent(event: UserChannelEvent): BotState["lastOrderEvent"] {
+  if (event.eventType === "order") {
+    return {
+      observedAt: new Date().toISOString(),
+      eventType: event.eventType,
+      status: event.statusType,
+      market: event.market,
+      assetId: event.assetId,
+      orderId: event.orderId,
+      outcome: event.outcome,
+      side: event.side,
+      price: event.price,
+      size: event.originalSize,
+      sizeMatched: event.sizeMatched,
+    };
+  }
+
+  return {
+    observedAt: new Date().toISOString(),
+    eventType: event.eventType,
+    status: event.statusType,
+    market: event.market,
+    assetId: event.assetId,
+    orderId: event.orderId,
+    tradeId: event.tradeId,
+    outcome: event.outcome,
+    side: event.side,
+    price: event.price,
+    size: event.size,
+  };
+}
+
+function toStateOpenOrder(order: OpenOrder): BotState["openOrders"][number] {
+  const originalSize = toNullableNumber(order.original_size);
+  const sizeMatched = toNullableNumber(order.size_matched);
+
+  return {
+    orderId: order.id,
+    status: order.status,
+    market: order.market,
+    assetId: order.asset_id,
+    side: order.side === "SELL" ? "SELL" : "BUY",
+    price: toNullableNumber(order.price),
+    originalSize,
+    sizeMatched,
+    remainingSize:
+      originalSize === null || sizeMatched === null
+        ? null
+        : Math.max(0, originalSize - sizeMatched),
+    outcome: order.outcome,
+    createdAt: unixSecondsToIso(order.created_at),
+  };
+}
+
+function toNullableNumber(value: string | number): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function unixSecondsToIso(value: number): string {
+  return new Date(value * 1_000).toISOString();
 }
 
 function toErrorMessage(error: unknown): string {

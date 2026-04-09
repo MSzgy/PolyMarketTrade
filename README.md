@@ -22,6 +22,10 @@ The default mode is safe:
 - Official CLOB SDK adapter using `@polymarket/clob-client`
 - Official geoblock check against `https://polymarket.com/api/geoblock`
 - Optional market WebSocket feed with REST fallback
+- Live execution manager with user WebSocket subscription, order reconciliation, and heartbeat loop
+- Dashboard market explorer for browsing active prediction events and selecting outcomes
+- Dashboard order ticket for one-off dry-run or live manual orders at top-of-book prices
+- Dashboard standard-binary arbitrage scanner for complete-set mispricing discovery
 - Local bot state persistence to `.data/bot-state.json`
 - Example threshold strategy:
   - buy one configured outcome when best ask falls below a threshold
@@ -40,6 +44,8 @@ src/
   engine/
     risk-manager.ts
     strategy.ts
+  execution/
+    order-manager.ts
   lib/
     env-file.ts
     http.ts
@@ -52,6 +58,7 @@ src/
     geoblock-client.ts
     market-websocket.ts
     types.ts
+    user-websocket.ts
   strategies/
     price-threshold.ts
 ```
@@ -98,7 +105,9 @@ STATE_FILE=.data/bot-state.json
 ENABLE_GEOBLOCK_CHECK=true
 POLYMARKET_GEOBLOCK_URL=https://polymarket.com/api/geoblock
 POLYMARKET_MARKET_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
+POLYMARKET_USER_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/user
 POLYMARKET_WS_READY_TIMEOUT_MS=5000
+POLYMARKET_HEARTBEAT_INTERVAL_MS=5000
 ```
 
 To enable live trading, set:
@@ -128,8 +137,9 @@ The sample strategy:
 - reads prices from the market WebSocket when enabled, otherwise from the CLOB orderbook
 - checks `best ask <= BUY_BELOW_PRICE`
 - passes the proposed order through risk limits
-- records last snapshot, signal, and recent orders to local state
+- records last snapshot, signal, recent orders, open orders, and user-stream events to local state
 - logs the order in dry-run mode or submits it in live mode
+- keeps live sessions warm with CLOB heartbeats while open orders exist
 
 ## Dashboard
 
@@ -139,8 +149,19 @@ The local dashboard serves a read-only monitoring UI with:
 - last signal, geoblock result, and recent orders
 - current market question and top-of-book snapshot from `/api/market`
 - editable strategy/runtime fields persisted through `POST /api/config`
+- active market discovery via `/api/markets`
+- manual order submission via `POST /api/order`
+- estimated complete-set opportunities via `GET /api/arbitrage`
 
 By default it listens on `http://127.0.0.1:3100`.
+
+The manual order flow is:
+
+1. Browse active markets in the explorer and click an outcome chip.
+2. The selection fills `MARKET_SLUG` and `OUTCOME` in the strategy form.
+3. Use the order ticket to send a dry-run or live order using top-of-book pricing.
+
+The arbitrage scanner only covers standard binary markets and reports estimated top-of-book edge before gas.
 
 The dashboard edit form only writes a safe whitelist of non-secret fields such as:
 
@@ -155,11 +176,11 @@ When an env file already exists, writes preserve unrelated keys and comments and
 - This starter assumes you are trading on Polygon (`chainId=137`).
 - The bot intentionally does not hide execution risk. It uses a simple threshold strategy, not a production-grade execution engine.
 - Live mode will stop on geoblock failure. Dry-run mode will warn and continue.
+- `POLYMARKET_HEARTBEAT_INTERVAL_MS` should stay below `10000`; the order manager clamps it to `9000` because Polymarket cancels sessions that miss a heartbeat for 10 seconds.
 - Before turning on live trading, add:
-  - persistent position/account reconciliation
   - retry/backoff
   - structured storage for fills, orders, and PnL
-  - order heartbeat handling for live resting orders
+  - order cancellation policies and stale-order cleanup
 
 ## Official references
 

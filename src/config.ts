@@ -14,7 +14,9 @@ export interface AppConfig {
   enableGeoblockCheck: boolean;
   geoblockUrl: string;
   marketWsUrl: string;
+  userWsUrl: string;
   marketWsReadyTimeoutMs: number;
+  heartbeatIntervalMs: number;
   portfolioAddress?: string;
   gammaUrl: string;
   dataUrl: string;
@@ -56,9 +58,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     marketWsUrl:
       env.POLYMARKET_MARKET_WS_URL?.trim() ||
       "wss://ws-subscriptions-clob.polymarket.com/ws/market",
+    userWsUrl:
+      env.POLYMARKET_USER_WS_URL?.trim() ||
+      "wss://ws-subscriptions-clob.polymarket.com/ws/user",
     marketWsReadyTimeoutMs: parseInteger(
       env.POLYMARKET_WS_READY_TIMEOUT_MS,
       "POLYMARKET_WS_READY_TIMEOUT_MS",
+      5_000,
+    ),
+    heartbeatIntervalMs: parseInteger(
+      env.POLYMARKET_HEARTBEAT_INTERVAL_MS,
+      "POLYMARKET_HEARTBEAT_INTERVAL_MS",
       5_000,
     ),
     portfolioAddress: optionalString(env.PORTFOLIO_ADDRESS),
@@ -86,6 +96,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     if (!config.funderAddress) {
       throw new Error("POLYMARKET_FUNDER_ADDRESS is required when DRY_RUN=false");
     }
+  }
+
+  if (config.heartbeatIntervalMs <= 0) {
+    throw new Error("POLYMARKET_HEARTBEAT_INTERVAL_MS must be a positive integer");
   }
 
   return config;

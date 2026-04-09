@@ -46,6 +46,77 @@
         </article>
       </section>
 
+      <section class="workspace-grid">
+        <article class="panel explorer-panel">
+          <div class="section-heading">
+            <p class="eyebrow">Explorer</p>
+            <h2>Active Prediction Events</h2>
+          </div>
+          <form id="marketSearchForm" class="explorer-toolbar">
+            <label class="search-field">
+              <span class="sr-only">Search markets</span>
+              <input
+                id="marketSearchInput"
+                type="search"
+                name="q"
+                placeholder="Search by question, slug, or outcome"
+                autocomplete="off"
+              />
+            </label>
+            <button id="marketSearchButton" class="action-button secondary" type="submit">
+              Search
+            </button>
+          </form>
+          <div id="explorerStatus" class="form-status neutral">
+            Loading active markets from Polymarket.
+          </div>
+          <div id="marketsGrid" class="markets-grid"></div>
+        </article>
+
+        <article class="panel order-panel">
+          <div class="section-heading">
+            <p class="eyebrow">Execution</p>
+            <h2>Order Ticket</h2>
+          </div>
+          <div id="selectedMarketSummary" class="selected-market-summary">
+            Pick a market from the explorer or fill the slug and outcome manually below.
+          </div>
+          <form id="orderForm" class="order-form">
+            <label class="field">
+              <span>Side</span>
+              <select id="order-side" name="side">
+                <option value="BUY">BUY</option>
+                <option value="SELL">SELL</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Size</span>
+              <input id="order-size" name="size" type="number" step="1" min="0" />
+            </label>
+            <label class="field">
+              <span>Limit Price (optional)</span>
+              <input id="order-limit-price" name="limitPrice" type="number" step="0.001" min="0" max="1" />
+            </label>
+            <label class="field checkbox-field">
+              <input id="order-dry-run" name="dryRun" type="checkbox" />
+              <span>Execute As Dry Run</span>
+            </label>
+          </form>
+          <div class="order-hint">
+            Leave limit price blank to use the current best ask for <code>BUY</code> or best bid
+            for <code>SELL</code>.
+          </div>
+          <div class="control-toolbar">
+            <div id="orderStatus" class="form-status neutral">
+              Manual order requests use the slug and outcome currently shown in the strategy form.
+            </div>
+            <button id="placeOrderButton" class="action-button" type="submit" form="orderForm">
+              Place Order
+            </button>
+          </div>
+        </article>
+      </section>
+
       <section class="dashboard-grid">
         <article class="panel">
           <div class="section-heading">
@@ -97,6 +168,20 @@
           </div>
           <dl class="detail-list" id="stateDetails"></dl>
         </article>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <p class="eyebrow">Arbitrage</p>
+          <h2>Standard Binary Scanner</h2>
+        </div>
+        <div id="arbitrageStatus" class="form-status neutral">
+          Scanning standard binary markets for complete-set mispricing.
+        </div>
+        <div id="arbitrageEmpty" class="empty-state hidden">
+          No positive complete-set edge is currently visible in the scanned market set.
+        </div>
+        <div id="arbitrageGrid" class="arbitrage-grid"></div>
       </section>
 
       <section class="panel control-panel">
@@ -185,10 +270,12 @@
               <tr>
                 <th>Time</th>
                 <th>Mode</th>
+                <th>Status</th>
                 <th>Side</th>
                 <th>Price</th>
                 <th>Size</th>
-                <th>Token</th>
+                <th>Order</th>
+                <th>Event</th>
                 <th>Reason</th>
               </tr>
             </thead>

@@ -20,6 +20,11 @@ export interface BotState {
     region: string;
     ip: string;
   };
+  heartbeat?: {
+    updatedAt: string;
+    heartbeatId?: string;
+    error?: string;
+  };
   lastSnapshot?: {
     updatedAt: string;
     tokenId: string;
@@ -37,14 +42,46 @@ export interface BotState {
     price?: number;
     size?: number;
   };
+  lastOrderEvent?: {
+    observedAt: string;
+    eventType: "order" | "trade";
+    status: string;
+    market?: string;
+    assetId?: string;
+    orderId?: string;
+    tradeId?: string;
+    outcome?: string;
+    side?: "BUY" | "SELL";
+    price: number | null;
+    size: number | null;
+    sizeMatched?: number | null;
+  };
+  openOrders: Array<{
+    orderId: string;
+    status: string;
+    market: string;
+    assetId: string;
+    side: "BUY" | "SELL";
+    price: number | null;
+    originalSize: number | null;
+    sizeMatched: number | null;
+    remainingSize: number | null;
+    outcome: string;
+    createdAt: string;
+  }>;
   recentOrders: Array<{
     createdAt: string;
     mode: "dry-run" | "live";
     tokenId: string;
+    marketSlug?: string;
+    marketQuestion?: string;
+    outcomeName?: string;
     side: "BUY" | "SELL";
     price: number;
     size: number;
     reason: string;
+    orderId?: string;
+    status?: string;
   }>;
 }
 
@@ -76,6 +113,7 @@ export class StateStore {
           ...defaults.stats,
           ...(raw.stats ?? {}),
         },
+        openOrders: Array.isArray(raw.openOrders) ? raw.openOrders.slice(-50) : [],
         recentOrders: Array.isArray(raw.recentOrders) ? raw.recentOrders.slice(-50) : [],
       };
     } catch {
@@ -100,6 +138,7 @@ export class StateStore {
         liveOrders: 0,
         skippedSignals: 0,
       },
+      openOrders: [],
       recentOrders: [],
     };
   }

@@ -1,5 +1,8 @@
 export interface GammaMarketRaw {
   id?: string;
+  conditionId?: string;
+  condition_id?: string;
+  market?: string;
   slug: string;
   question: string;
   active?: boolean;
@@ -24,6 +27,7 @@ export interface MarketOutcome {
 
 export interface NormalizedMarket {
   id?: string;
+  conditionId?: string;
   slug: string;
   question: string;
   active: boolean;
@@ -61,6 +65,7 @@ export function normalizeGammaMarket(raw: GammaMarketRaw): NormalizedMarket {
 
   return {
     id: raw.id,
+    conditionId: normalizeIdentifier(raw.conditionId ?? raw.condition_id ?? raw.market ?? raw.id),
     slug: raw.slug,
     question: raw.question,
     active: Boolean(raw.active),
@@ -107,6 +112,15 @@ function parseStringArray(value: string[] | string | undefined): string[] {
   }
 
   return [trimmed];
+}
+
+function normalizeIdentifier(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const trimmed = String(value).trim();
+  return trimmed === "" ? undefined : trimmed;
 }
 
 function toNumber(value: unknown): number | null {
