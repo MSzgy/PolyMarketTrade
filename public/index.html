@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Polymarket Control Room</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="background-grid" aria-hidden="true"></div>
+    <main class="shell">
+      <section class="hero panel">
+        <div class="hero-copy">
+          <p class="eyebrow">Local Dashboard</p>
+          <h1>Polymarket Control Room</h1>
+          <p class="hero-text">
+            Local console for bot telemetry, market context, recent signals, and safe strategy
+            configuration.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="refreshButton" class="action-button">Refresh Now</button>
+          <div class="live-pill">
+            <span class="live-dot"></span>
+            <span id="lastUpdatedLabel">Waiting for data</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="metrics-row">
+        <article class="metric-card panel">
+          <span class="metric-label">Ticks</span>
+          <strong class="metric-value" id="ticksMetric">0</strong>
+        </article>
+        <article class="metric-card panel">
+          <span class="metric-label">Dry-Run Orders</span>
+          <strong class="metric-value" id="dryRunOrdersMetric">0</strong>
+        </article>
+        <article class="metric-card panel">
+          <span class="metric-label">Live Orders</span>
+          <strong class="metric-value" id="liveOrdersMetric">0</strong>
+        </article>
+        <article class="metric-card panel">
+          <span class="metric-label">Skipped Signals</span>
+          <strong class="metric-value" id="skippedSignalsMetric">0</strong>
+        </article>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="panel">
+          <div class="section-heading">
+            <p class="eyebrow">Runtime</p>
+            <h2>Bot Status</h2>
+          </div>
+          <div id="statusTags" class="tag-row"></div>
+          <dl class="detail-list" id="runtimeDetails"></dl>
+          <div id="configErrorBox" class="callout hidden"></div>
+        </article>
+
+        <article class="panel market-panel">
+          <div class="section-heading">
+            <p class="eyebrow">Market</p>
+            <h2>Current Snapshot</h2>
+          </div>
+          <div id="marketHeader" class="market-header"></div>
+          <div class="price-grid">
+            <div class="price-box">
+              <span>Best Bid</span>
+              <strong id="bestBidValue">--</strong>
+            </div>
+            <div class="price-box">
+              <span>Midpoint</span>
+              <strong id="midpointValue">--</strong>
+            </div>
+            <div class="price-box accent">
+              <span>Best Ask</span>
+              <strong id="bestAskValue">--</strong>
+            </div>
+          </div>
+          <dl class="detail-list compact" id="marketDetails"></dl>
+        </article>
+
+        <article class="panel">
+          <div class="section-heading">
+            <p class="eyebrow">Signal</p>
+            <h2>Last Decision</h2>
+          </div>
+          <div id="signalBanner" class="signal-banner neutral">No signal recorded yet</div>
+          <p id="signalReason" class="signal-reason">Waiting for the bot to evaluate a market.</p>
+          <dl class="detail-list compact" id="signalDetails"></dl>
+        </article>
+
+        <article class="panel">
+          <div class="section-heading">
+            <p class="eyebrow">State</p>
+            <h2>Persistence</h2>
+          </div>
+          <dl class="detail-list" id="stateDetails"></dl>
+        </article>
+      </section>
+
+      <section class="panel control-panel">
+        <div class="section-heading">
+          <p class="eyebrow">Controls</p>
+          <h2>Strategy Configuration</h2>
+        </div>
+        <div class="control-copy">
+          <p>
+            These fields write to the local <code>.env</code>. Changes affect future bot starts.
+            Restart a running bot process after saving.
+          </p>
+        </div>
+        <form id="configForm" class="control-form">
+          <label class="field">
+            <span>Market Slug</span>
+            <input id="field-market-slug" name="MARKET_SLUG" type="text" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Outcome</span>
+            <input id="field-outcome" name="OUTCOME" type="text" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Buy Below Price</span>
+            <input id="field-buy-below" name="BUY_BELOW_PRICE" type="number" step="0.001" />
+          </label>
+          <label class="field">
+            <span>Order Size</span>
+            <input id="field-order-size" name="ORDER_SIZE" type="number" step="1" />
+          </label>
+          <label class="field">
+            <span>Polling Interval (ms)</span>
+            <input id="field-poll-interval" name="POLL_INTERVAL_MS" type="number" step="1000" />
+          </label>
+          <label class="field">
+            <span>Max Position Size</span>
+            <input id="field-max-position" name="MAX_POSITION_SIZE" type="number" step="1" />
+          </label>
+          <label class="field">
+            <span>Max Notional Per Order</span>
+            <input id="field-max-notional" name="MAX_NOTIONAL_PER_ORDER" type="number" step="1" />
+          </label>
+          <label class="field">
+            <span>Market Data Mode</span>
+            <select id="field-market-mode" name="MARKET_DATA_MODE">
+              <option value="websocket">websocket</option>
+              <option value="polling">polling</option>
+            </select>
+          </label>
+          <label class="field checkbox-field">
+            <input id="field-dry-run" name="DRY_RUN" type="checkbox" />
+            <span>Dry Run</span>
+          </label>
+          <label class="field checkbox-field">
+            <input id="field-run-once" name="RUN_ONCE" type="checkbox" />
+            <span>Run Once</span>
+          </label>
+          <label class="field checkbox-field">
+            <input
+              id="field-geoblock"
+              name="ENABLE_GEOBLOCK_CHECK"
+              type="checkbox"
+            />
+            <span>Enable Geoblock Check</span>
+          </label>
+        </form>
+        <div class="control-toolbar">
+          <div id="formStatus" class="form-status neutral">
+            No local edits yet. Save writes only the editable strategy fields.
+          </div>
+          <button id="saveConfigButton" class="action-button" type="submit" form="configForm">
+            Save to .env
+          </button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <p class="eyebrow">Orders</p>
+          <h2>Recent Activity</h2>
+        </div>
+        <div id="ordersEmpty" class="empty-state">No recent orders have been recorded.</div>
+        <div class="table-wrap">
+          <table class="orders-table hidden" id="ordersTable">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Mode</th>
+                <th>Side</th>
+                <th>Price</th>
+                <th>Size</th>
+                <th>Token</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody id="ordersBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "name": "polymarket-trade",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "bot:dev": "node --import tsx src/index.ts",
+    "bot:start": "node --enable-source-maps dist/index.js",
+    "dashboard": "node --import tsx src/dashboard-server.ts",
+    "dashboard:start": "node --enable-source-maps dist/dashboard-server.js",
+    "dev": "node --import tsx src/index.ts",
+    "start": "node --enable-source-maps dist/index.js"
+  },
+  "dependencies": {
+    "@ethersproject/wallet": "^5.7.0",
+    "@polymarket/clob-client": "^5.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}
